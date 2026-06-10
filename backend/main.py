@@ -16,13 +16,6 @@ from docx import Document
 
 from reportlab.platypus import (SimpleDocTemplate,Paragraph,Spacer)
 from reportlab.lib.styles import (getSampleStyleSheet)
-from sql_database import (
-    save_research,
-    get_user_history,
-    delete_research,
-    create_user,
-    authenticate_user
-)
 from auth import (get_current_user,create_access_token)
 from models import (ResearchRequest,UserRegister,UserLogin)
 from agents.pipeline import ResearchPipeline

@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage
 
 load_dotenv()
 
-async def generate_with_gemini(topic: str, analysis_brief: str):
+async def generate_with_gemini(topic: str, analysis_brief: str = ""):
 
     prompt = f"""
 You are a professional AI research report writer.
@@ -17,7 +17,7 @@ Topic:
 {topic}
 
 Research Brief:
-{analysis_brief}
+{analysis_brief or "No brief provided."}
 
 Required markdown format:
 
