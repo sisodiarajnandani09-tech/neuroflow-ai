@@ -1,0 +1,29 @@
+# Backend
+backend/venv/
+backend/.env
+backend/__pycache__/
+backend/uploads/
+backend/downloads/
+backend/neuroflow.db
+# Data files
+backend/data/*.json
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+
+# VS Code
+.vscode/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
