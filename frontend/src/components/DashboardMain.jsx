@@ -1,16 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import API from "../services/api";
 
+import Sidebar from "./Sidebar";
+import AgentStatus from "./AgentStatus";
+import ChatArea from "./ChatArea";
+import MessageInput from "./MessageInput";
+
 export default function DashboardMain() {
   const router = useRouter();
+
   const fileInputRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const sendingRef = useRef(false);
 
   const [input, setInput] = useState("");
-  const [selectedPdf, setSelectedPdf] = useState(null);
-  const [selectedChat, setSelectedChat] = useState(0);
+  const [search, setSearch] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedChatId, setSelectedChatId] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -18,80 +28,102 @@ export default function DashboardMain() {
   const [activeAgent, setActiveAgent] = useState("");
   const [agentLogs, setAgentLogs] = useState([]);
 
-  const [chats, setChats] = useState([
-    {
-      id: null,
-      title: "Welcome Chat",
-      pinned: false,
-      report: "",
-      messages: [
-        {
-          role: "assistant",
-          content: "Hi, I am NeuroFlow AI. Ask me anything or attach a PDF.",
-        },
-      ],
-    },
-  ]);
+  const [chats, setChats] = useState([]);
+  const [darkMode, setDarkMode] = useState(false);
+  const [micMuted, setMicMuted] = useState(false);
 
-  const currentChat = chats[selectedChat] || chats[0];
+  const createWelcomeChat = () => ({
+    id: crypto.randomUUID(),
+    backendIds: [],
+    title: "Welcome Chat",
+    pinned: false,
+    report: "",
+    messages: [
+      {
+        role: "assistant",
+        content: "Hi, I am NeuroFlow AI. Ask me anything or attach a PDF/Image.",
+      },
+    ],
+  });
+useEffect(() => {
+  const savedTheme = localStorage.getItem("theme");
+  setDarkMode(savedTheme === "dark");
+
+  let oldChats = [];
+
+  const savedChats = localStorage.getItem("neuroflow_chats");
+
+  if (savedChats) {
+    try {
+      const parsed = JSON.parse(savedChats);
+      if (Array.isArray(parsed)) {
+        oldChats = parsed;
+      }
+    } catch {
+      localStorage.removeItem("neuroflow_chats");
+    }
+  }
+
+  const freshChat = {
+    id: crypto.randomUUID(),
+    backendIds: [],
+    title: "New Chat",
+    pinned: false,
+    report: "",
+    messages: [
+      {
+        role: "assistant",
+        content:
+          "New chat started. What do you want to research?",
+      },
+    ],
+  };
+
+  setChats([freshChat, ...oldChats]);
+  setSelectedChatId(freshChat.id);
+}, []);
 
   useEffect(() => {
-    loadHistory();
-  }, []);
-
-  const loadHistory = async () => {
-    try {
-      const response = await API.get("/history");
-
-      const savedChats = response.data.map((item) => ({
-        id: item.id,
-        title: item.topic || "Untitled Chat",
-        pinned: false,
-        report: item.report || "",
-        messages: [
-          {
-            role: "user",
-            content: item.topic || "",
-          },
-          {
-            role: "assistant",
-            content: item.report || "",
-          },
-        ],
-      }));
-
-      if (savedChats.length > 0) {
-        setChats(savedChats);
-        setSelectedChat(0);
-      }
-    } catch (error) {
-      console.error("History load failed", error);
+    if (chats.length > 0) {
+      localStorage.setItem("neuroflow_chats", JSON.stringify(chats));
     }
+  }, [chats]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chats, selectedChatId, loading]);
+
+  const currentChat =
+    chats.find((chat) => chat.id === selectedChatId) || chats[0];
+
+  const updateChat = (updatedChat) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === updatedChat.id ? updatedChat : chat
+      )
+    );
   };
 
   const newChat = () => {
     const chat = {
-      id: null,
+      id: crypto.randomUUID(),
+      backendIds: [],
       title: "New Chat",
       pinned: false,
       report: "",
       messages: [
         {
           role: "assistant",
-          content: "New chat started. You can ask a question or attach a PDF.",
+          content: "New chat started. What do you want to research?",
         },
       ],
     };
 
-    setChats([chat, ...chats]);
-    setSelectedChat(0);
-    setSelectedPdf(null);
-  };
-
-  const updateCurrentChat = (updatedChat) => {
-    const updated = [...chats];
-    updated[selectedChat] = updatedChat;
-    setChats(updated);
+    setChats((prev) => [chat, ...prev]);
+    setSelectedChatId(chat.id);
+    setInput("");
+    setSearch("");
+    setSelectedFile(null);
   };
 
   const markAgent = (name) => {
@@ -99,95 +131,133 @@ export default function DashboardMain() {
     setAgentLogs((prev) => [...prev, `${name} running`]);
   };
 
-  const selectPdf = (event) => {
+  const selectFile = (event) => {
     const file = event.target.files[0];
 
     if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      alert("Please upload PDF only.");
+    const allowedTypes = [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/jpg",
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      alert("Only PDF, JPG, JPEG and PNG files are allowed.");
       event.target.value = "";
       return;
     }
 
-    setSelectedPdf(file);
+    setSelectedFile({
+      file,
+      name: file.name,
+    });
   };
 
   const sendMessage = async () => {
-    if (!input.trim()) {
-      alert("Please enter your question first.");
-      return;
-    }
+    if (sendingRef.current || loading) return;
+    if (!input.trim() || !currentChat) return;
 
     const userText = input.trim();
 
-    const userMessageContent = selectedPdf
-      ? `${userText}\n\n📄 Attached PDF: ${selectedPdf.name}`
-      : userText;
+    if (userText.length < 3 || userText.length > 500) {
+      updateChat({
+        ...currentChat,
+        messages: [
+          ...currentChat.messages,
+          {
+            role: "assistant",
+            content:
+              "⚠️ Please enter a valid query between 3 and 500 characters.",
+          },
+        ],
+      });
+      return;
+    }
 
-    const updatedChat = {
-      ...currentChat,
-      title: userText.slice(0, 35),
-      messages: [
-        ...currentChat.messages,
-        {
-          role: "user",
-          content: userMessageContent,
-        },
-      ],
-    };
-
-    updateCurrentChat(updatedChat);
-
-    setInput("");
+    sendingRef.current = true;
     setLoading(true);
     setAgentLogs([]);
     markAgent("Research Agent");
 
+    const userContent = selectedFile
+      ? `${userText}\n\n📎 Attached File: ${selectedFile.name}`
+      : userText;
+
+    const updatedChat = {
+      ...currentChat,
+      title:
+        currentChat.title === "Welcome Chat" ||
+        currentChat.title === "New Chat"
+          ? userText.slice(0, 35)
+          : currentChat.title,
+      messages: [
+        ...currentChat.messages,
+        {
+          role: "user",
+          content: userContent,
+        },
+      ],
+    };
+
+    updateChat(updatedChat);
+    setInput("");
+
     try {
-      if (selectedPdf) {
+      let response;
+
+      if (selectedFile) {
         setUploading(true);
 
         const formData = new FormData();
-        formData.append("file", selectedPdf);
+        formData.append("file", selectedFile.file);
 
-        await API.post("/upload-pdf", formData, {
+        const uploadResponse = await API.post("/upload-file", formData, {
           headers: {
             "Content-Type": "multipart/form-data",
           },
         });
 
-        setUploading(false);
+        response = await API.post("/ask-document", {
+          document_id: uploadResponse.data.document_id,
+          question: userText,
+        });
+      } else {
+        setTimeout(() => markAgent("Analyst Agent"), 700);
+        setTimeout(() => markAgent("Writer Agent"), 1400);
+        setTimeout(() => markAgent("Manager Agent"), 2100);
+
+        response = await API.post("/research", {
+          topic: userText,
+        });
       }
 
-      const responsePromise = API.post("/research", {
-        topic: userText,
-      });
-
-      setTimeout(() => markAgent("Analyst Agent"), 900);
-      setTimeout(() => markAgent("Writer Agent"), 1800);
-      setTimeout(() => markAgent("Manager Agent"), 2700);
-
-      const response = await responsePromise;
-
-      setAgentLogs(response.data.logs || []);
-      setActiveAgent("Completed");
+      const aiResponse =
+        response.data.answer ||
+        response.data.report ||
+        "No response generated.";
 
       const finalChat = {
         ...updatedChat,
-        id: response.data.id,
-        report: response.data.report || "",
+        backendIds: response.data.id
+          ? [...(updatedChat.backendIds || []), response.data.id]
+          : updatedChat.backendIds || [],
+        report: aiResponse,
         messages: [
           ...updatedChat.messages,
           {
             role: "assistant",
-            content: response.data.report || "No response generated.",
+            content: aiResponse,
           },
         ],
       };
 
-      updateCurrentChat(finalChat);
-      setSelectedPdf(null);
+      setAgentLogs(response.data.logs || []);
+      setActiveAgent("Completed");
+      updateChat(finalChat);
+
+      setSelectedFile(null);
 
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -196,94 +266,77 @@ export default function DashboardMain() {
       console.error(error);
       setActiveAgent("Failed");
 
-      updateCurrentChat({
+      const detail = error?.response?.data?.detail;
+
+      updateChat({
         ...updatedChat,
         messages: [
           ...updatedChat.messages,
           {
             role: "assistant",
-            content: "Backend error. Please check FastAPI terminal.",
+            content:
+              detail || "Backend error. Please check FastAPI terminal.",
           },
         ],
       });
     } finally {
+      sendingRef.current = false;
       setLoading(false);
       setUploading(false);
 
       setTimeout(() => {
         setActiveAgent("");
-      }, 2500);
+      }, 2000);
     }
   };
 
-  const deleteChat = async (index) => {
-    const chat = chats[index];
-
-    try {
-      if (chat.id) {
-        await API.delete(`/history/${chat.id}`);
-      }
-    } catch (error) {
-      console.error("Delete failed", error);
-    }
-
-    const updated = chats.filter((_, i) => i !== index);
+  const deleteChat = async (chatId) => {
+    const updated = chats.filter((chat) => chat.id !== chatId);
 
     if (updated.length === 0) {
-      setChats([
-        {
-          id: null,
-          title: "Welcome Chat",
-          pinned: false,
-          report: "",
-          messages: [
-            {
-              role: "assistant",
-              content: "Hi, I am NeuroFlow AI.",
-            },
-          ],
-        },
-      ]);
-      setSelectedChat(0);
+      const welcome = createWelcomeChat();
+      setChats([welcome]);
+      setSelectedChatId(welcome.id);
       return;
     }
 
     setChats(updated);
-    setSelectedChat(0);
+    setSelectedChatId(updated[0].id);
   };
 
-  const sortedChats = [...chats].sort(
-    (a, b) => Number(b.pinned) - Number(a.pinned)
-  );
-
-  const togglePin = (sortedIndex) => {
-    const chat = sortedChats[sortedIndex];
-    const originalIndex = chats.findIndex((c) => c === chat);
-
-    const updated = [...chats];
-    updated[originalIndex].pinned = !updated[originalIndex].pinned;
-
-    setChats(updated);
-    setSelectedChat(originalIndex);
+  const togglePin = (chatId) => {
+    setChats((prev) =>
+      prev.map((chat) =>
+        chat.id === chatId
+          ? { ...chat, pinned: !chat.pinned }
+          : chat
+      )
+    );
   };
 
   const downloadFile = async (type) => {
-    if (!currentChat?.report) {
-      alert("No report available to download.");
+    if (!currentChat?.messages?.length) {
+      alert("No chat available to download.");
       return;
     }
 
     const endpoint = type === "pdf" ? "/download-pdf" : "/download-docx";
 
+    const fullChat = currentChat.messages
+      .map(
+        (msg) => `
+${msg.role === "user" ? "👤 USER" : "🤖 NEUROFLOW AI"}
+
+${msg.content}
+`
+      )
+      .join("\n\n====================================\n\n");
+
     try {
       const response = await API.post(
         endpoint,
-        {
-          report: currentChat.report,
-        },
-        {
-          responseType: "blob",
-        }
+        { report: fullChat },
+        { responseType: "blob" }
       );
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -291,18 +344,26 @@ export default function DashboardMain() {
 
       link.href = url;
       link.download =
-        type === "pdf" ? "neuroflow-report.pdf" : "neuroflow-report.docx";
+        type === "pdf"
+          ? `${currentChat.title}.pdf`
+          : `${currentChat.title}.docx`;
 
       document.body.appendChild(link);
       link.click();
       link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error(error);
-      alert("Download failed. Please check backend.");
+      alert("Download failed.");
     }
   };
 
   const startVoiceInput = () => {
+    if (micMuted) {
+      alert("Microphone is muted.");
+      return;
+    }
+
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -311,20 +372,25 @@ export default function DashboardMain() {
       return;
     }
 
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+      setMicMuted(true);
+      return;
+    }
+
     const recognition = new SpeechRecognition();
-
     recognition.lang = "en-IN";
-    recognition.interimResults = false;
-    recognition.continuous = false;
 
+    recognitionRef.current = recognition;
     recognition.start();
 
     recognition.onresult = (event) => {
       setInput(event.results[0][0].transcript);
     };
 
-    recognition.onerror = () => {
-      alert("Voice input failed. Try again.");
+    recognition.onend = () => {
+      recognitionRef.current = null;
     };
   };
 
@@ -333,305 +399,101 @@ export default function DashboardMain() {
     router.push("/");
   };
 
+  const filteredChats = useMemo(() => {
+    return [...chats]
+      .filter((chat) =>
+        chat.title.toLowerCase().includes(search.toLowerCase())
+      )
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  }, [chats, search]);
+
   return (
-    <div className="min-h-screen bg-linear-to-br from-[#dfe5e8] via-[#eef7f8] to-[#fde7ef] p-8">
-  <div className="mx-auto flex h-[88vh] max-w-7xl overflow-hidden rounded-[34px] border border-white/60 bg-linear-to-br from-cyan-50 via-white to-pink-50 shadow-2xl">
-    
-    <aside className="w-52 border-r border-white/60 bg-white/55 p-5 backdrop-blur-xl">
-      <div className="mb-8">
-        <img
-          src="/logo.png"
-          alt="NeuroFlow AI Logo"
-          className="w-28 rounded-xl"
-        />
-      </div>
-
-          <button
-            onClick={newChat}
-            className="mb-6 w-full rounded-full bg-pink-500 py-3 text-white"
-          >
-            💬 New Chat
-          </button>
-
-          <nav className="space-y-4 text-sm text-gray-700">
-            <SideButton label="Chat Helper" onClick={() => {}} />
-
-            <SideButton
-              label="Settings"
-              onClick={() => router.push("/settings")}
-            />
-
-            <SideButton label="Logout" onClick={logout} />
-          </nav>
-        </aside>
-
-        <main className="flex flex-1 flex-col bg-linear-to-br from-cyan-200 via-yellow-100 to-pink-200 p-6">
-          <AgentStatus activeAgent={activeAgent} logs={agentLogs} />
-
-          <div className="flex-1 overflow-y-auto px-4">
-            {currentChat.messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`mb-5 flex ${
-                  msg.role === "user" ? "justify-end" : "justify-start"
-                }`}
-              >
-                <div
-                  className={`max-w-[72%] rounded-2xl p-5 text-sm leading-7 shadow-sm ${
-                    msg.role === "user"
-                      ? "bg-white text-black"
-                      : "bg-[#fffaf0] text-black"
-                  }`}
-                >
-                  <p className="mb-2 font-bold text-blue-600">
-                    {msg.role === "user" ? "You" : "NeuroFlow AI"}
-                  </p>
-
-                  <pre className="whitespace-pre-wrap font-sans">
-                    {msg.content}
-                  </pre>
-                </div>
-              </div>
-            ))}
-
-            {loading && (
-              <div className="rounded-2xl bg-[#fffaf0] p-5 text-sm shadow">
-                NeuroFlow AI is thinking...
-              </div>
-            )}
-          </div>
-
-          {selectedPdf && (
-            <div className="mb-2 flex items-center justify-between rounded-2xl bg-white/70 px-4 py-2 text-xs text-gray-700">
-              <span>📄 Selected PDF: {selectedPdf.name}</span>
-
-              <button
-                onClick={() => {
-                  setSelectedPdf(null);
-
-                  if (fileInputRef.current) {
-                    fileInputRef.current.value = "";
-                  }
-                }}
-                className="rounded-full bg-red-500 px-2 py-1 text-white"
-              >
-                Remove
-              </button>
-            </div>
-          )}
-
-          <div className="mt-4 flex items-center gap-3">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              onChange={selectPdf}
-              className="hidden"
-            />
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="rounded-full bg-white p-3"
-              title="Select PDF"
-            >
-              📎
-            </button>
-
-            <button
-              onClick={startVoiceInput}
-              className="rounded-full bg-white p-3"
-              title="Voice Input"
-            >
-              🎙️
-            </button>
-
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") sendMessage();
-              }}
-              placeholder={
-                selectedPdf
-                  ? "Ask a question about selected PDF..."
-                  : "Start typing"
-              }
-              className="flex-1 rounded-full bg-white px-5 py-3 text-sm outline-none"
-            />
-
-            <button
-              onClick={sendMessage}
-              disabled={loading}
-              className="rounded-full bg-pink-500 px-5 py-3 text-white disabled:opacity-60"
-            >
-              ➤
-            </button>
-          </div>
-        </main>
-
-        <aside className="w-77 bg-linear-to-b from-yellow-100 to-orange-200 p-6">
-          <div className="mb-4 flex justify-between">
-            <h2 className="text-2xl font-serif">History</h2>
-
-            <span className="text-xs">{chats.length}/30</span>
-          </div>
-
-          {sortedChats.map((chat, index) => (
-            <div
-              key={`${chat.id || chat.title}-${index}`}
-              className="mb-3 rounded-xl bg-white/50 p-3 text-sm"
-            >
-              <button
-                onClick={() => {
-                  const originalIndex = chats.findIndex((c) => c === chat);
-                  setSelectedChat(originalIndex);
-                }}
-                className="w-full text-left"
-              >
-                <p className="font-bold">
-                  {chat.pinned ? "📌 " : "💬 "}
-                  {chat.title}
-                </p>
-
-                <p className="text-xs text-gray-600">
-                  {chat.messages.length} messages
-                </p>
-              </button>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  onClick={() => togglePin(index)}
-                  className="rounded-full bg-blue-100 text-blue-700 px-3 py-1 text-xs hover:bg-blue-200"
-                >
-                  Pin
-                </button>
-
-                <button
-                  onClick={() => {
-                    const originalIndex = chats.findIndex((c) => c === chat);
-                    setSelectedChat(originalIndex);
-                    setTimeout(() => downloadFile("pdf"), 100);
-                  }}
-                  className="rounded-full bg-green-100 text-green-700 px-3 py-1 text-xs hover:bg-green-200"
-                >
-                  PDF
-                </button>
-
-                <button
-                  onClick={() => {
-                    const originalIndex = chats.findIndex((c) => c === chat);
-                    setSelectedChat(originalIndex);
-                    setTimeout(() => downloadFile("docx"), 100);
-                  }}
-                  className="rounded-full bg-purple-100 text-purple-700 px-3 py-1 text-xs hover:bg-purple-200"
-                >
-                  DOCX
-                </button>
-
-                <button
-                  onClick={() => {
-                    const originalIndex = chats.findIndex((c) => c === chat);
-                    deleteChat(originalIndex);
-                  }}
-                  className="rounded-full bg-red-100 text-red-700 px-3 py-1 text-xs hover:bg-red-200"
-                >
-                  Del
-                </button>
-              </div>
-            </div>
-          ))}
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function SideButton({ label, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className="block w-full rounded-xl px-3 py-2 text-left hover:bg-gray-100"
+    <div
+      className={`h-screen overflow-hidden ${
+        darkMode
+          ? "bg-[#07111f] text-white"
+          : "bg-linear-to-br from-indigo-100 via-sky-100 to-pink-100 text-[#111827]"
+      }`}
     >
-      {label}
-    </button>
-  );
-}
+      <div className="flex h-full">
+        <Sidebar
+          darkMode={darkMode}
+          chats={filteredChats}
+          selectedChatId={selectedChatId}
+          setSelectedChatId={setSelectedChatId}
+          search={search}
+          setSearch={setSearch}
+          newChat={newChat}
+          togglePin={togglePin}
+          deleteChat={deleteChat}
+          logout={logout}
+        />
 
-function AgentStatus({ activeAgent, logs }) {
-  const agents = [
-    "Research Agent",
-    "Analyst Agent",
-    "Writer Agent",
-    "Manager Agent",
-  ];
-
-  const joinedLogs = logs.join(" ").toLowerCase();
-
-  const getStatus = (agent) => {
-    if (activeAgent === "Completed") return "done";
-    if (activeAgent === "Failed") return "failed";
-    if (activeAgent === agent) return "active";
-
-    if (agent === "Research Agent" && joinedLogs.includes("research")) {
-      return "done";
-    }
-
-    if (agent === "Analyst Agent" && joinedLogs.includes("analyst")) {
-      return "done";
-    }
-
-    if (agent === "Writer Agent" && joinedLogs.includes("writer")) {
-      return "done";
-    }
-
-    if (agent === "Manager Agent" && joinedLogs.includes("manager")) {
-      return "done";
-    }
-
-    return "waiting";
-  };
-
-  return (
-    <div className="mb-4 rounded-2xl bg-white/60 p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-gray-800">Agent Workflow</h3>
-
-        <span className="text-xs text-gray-600">
-          {activeAgent || "Idle"}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-4 gap-2">
-        {agents.map((agent) => {
-          const status = getStatus(agent);
-
-          return (
-            <div
-              key={agent}
-              className={`rounded-xl px-2 py-3 text-center text-xs transition-all duration-300 ${
-                status === "active"
-                  ? "scale-105 bg-blue-600 text-white shadow-[0_0_18px_rgba(37,99,235,0.9)]"
-                  : status === "done"
-                  ? "bg-green-500 text-white shadow-[0_0_12px_rgba(34,197,94,0.55)]"
-                  : status === "failed"
-                  ? "bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.55)]"
-                  : "bg-white/70 text-gray-500"
-              }`}
-            >
-              <div className="mb-1 text-lg">
-                {status === "done"
-                  ? "✓"
-                  : status === "active"
-                  ? "⚡"
-                  : status === "failed"
-                  ? "!"
-                  : "○"}
-              </div>
-
-              <div>{agent}</div>
+        <main
+          className={`flex flex-1 flex-col ${
+            darkMode
+              ? "bg-[#07111f]"
+              : "bg-linear-to-br from-sky-100 via-violet-100 to-pink-100"
+          }`}
+        >
+          <header
+            className={`flex items-center justify-between border-b px-8 py-4 backdrop-blur-xl ${
+              darkMode
+                ? "border-white/10 bg-white/5"
+                : "border-white/70 bg-white/40"
+            }`}
+          >
+            <div>
+              <h2 className="text-lg font-bold">
+                {currentChat?.title || "Chat"}
+              </h2>
+              <p className="text-xs opacity-70">
+                {uploading ? "Uploading File..." : "NeuroFlow AI"}
+              </p>
             </div>
-          );
-        })}
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => downloadFile("pdf")}
+                className="rounded-full bg-linear-to-r from-emerald-400 to-green-500 px-4 py-2 text-xs font-semibold text-white"
+              >
+                PDF
+              </button>
+
+              <button
+                onClick={() => downloadFile("docx")}
+                className="rounded-full bg-linear-to-r from-purple-500 to-pink-500 px-4 py-2 text-xs font-semibold text-white"
+              >
+                DOCX
+              </button>
+            </div>
+          </header>
+
+          <AgentStatus activeAgent={activeAgent} darkMode={darkMode} />
+
+          <ChatArea
+            currentChat={currentChat}
+            loading={loading}
+            darkMode={darkMode}
+            chatEndRef={chatEndRef}
+          />
+
+          <MessageInput
+            input={input}
+            setInput={setInput}
+            sendMessage={sendMessage}
+            loading={loading}
+            selectedFile={selectedFile}
+            setSelectedFile={setSelectedFile}
+            fileInputRef={fileInputRef}
+            selectFile={selectFile}
+            startVoiceInput={startVoiceInput}
+            micMuted={micMuted}
+            setMicMuted={setMicMuted}
+            recognitionRef={recognitionRef}
+            darkMode={darkMode}
+          />
+        </main>
       </div>
     </div>
   );

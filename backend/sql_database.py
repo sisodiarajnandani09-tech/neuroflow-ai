@@ -1,15 +1,31 @@
-import json
+import uuid
 from datetime import datetime
 
-from db import SessionLocal
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
 from auth import hash_password, verify_password
-from sql_models import User, ResearchHistory, UploadedDocument
 
 
-def create_user(
-    email: str,
-    password: str
-):
+DATABASE_URL = "sqlite:///./neuroflow.db"
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+Base = declarative_base()
+
+
+def create_user(email: str, password: str):
+    from sql_models import User
+
     db = SessionLocal()
 
     try:
@@ -24,7 +40,8 @@ def create_user(
 
         user = User(
             email=email,
-            password=hash_password(password)
+            password=hash_password(password),
+            created_at=datetime.utcnow()
         )
 
         db.add(user)
@@ -36,10 +53,9 @@ def create_user(
         db.close()
 
 
-def authenticate_user(
-    email: str,
-    password: str
-):
+def authenticate_user(email: str, password: str):
+    from sql_models import User
+
     db = SessionLocal()
 
     try:
@@ -52,10 +68,7 @@ def authenticate_user(
         if not user:
             return None
 
-        if not verify_password(
-            password,
-            user.password
-        ):
+        if not verify_password(password, user.password):
             return None
 
         return {
@@ -73,41 +86,43 @@ def save_research(
     report: str,
     logs=None
 ):
+    from sql_models import ResearchHistory
+
     db = SessionLocal()
 
     try:
-        record = ResearchHistory(
+        research = ResearchHistory(
+            id=str(uuid.uuid4()),
             user_email=user_email,
             topic=topic,
             report=report,
-            logs=json.dumps(logs or []),
+            logs="\n".join(logs or []),
             created_at=datetime.utcnow()
         )
 
-        db.add(record)
+        db.add(research)
         db.commit()
-        db.refresh(record)
+        db.refresh(research)
 
         return {
-            "id": record.id,
-            "user_email": record.user_email,
-            "topic": record.topic,
-            "report": record.report,
-            "logs": json.loads(record.logs or "[]"),
-            "created_at": record.created_at.isoformat()
+            "id": research.id,
+            "topic": research.topic,
+            "report": research.report,
+            "logs": research.logs,
+            "created_at": str(research.created_at)
         }
 
     finally:
         db.close()
 
 
-def get_user_history(
-    user_email: str
-):
+def get_user_history(user_email: str):
+    from sql_models import ResearchHistory
+
     db = SessionLocal()
 
     try:
-        records = (
+        history = (
             db.query(ResearchHistory)
             .filter(ResearchHistory.user_email == user_email)
             .order_by(ResearchHistory.created_at.desc())
@@ -116,88 +131,41 @@ def get_user_history(
 
         return [
             {
-                "id": record.id,
-                "user_email": record.user_email,
-                "topic": record.topic,
-                "report": record.report,
-                "logs": json.loads(record.logs or "[]"),
-                "created_at": record.created_at.isoformat()
+                "id": item.id,
+                "topic": item.topic,
+                "report": item.report,
+                "logs": item.logs,
+                "created_at": str(item.created_at)
             }
-            for record in records
+            for item in history
         ]
 
     finally:
         db.close()
 
 
-def delete_research(
-    research_id,
-    user_email: str
-):
+def delete_research(research_id: str, user_email: str):
+    from sql_models import ResearchHistory
+
     db = SessionLocal()
 
     try:
-        record = (
+        item = (
             db.query(ResearchHistory)
             .filter(
-                ResearchHistory.id == int(research_id),
+                ResearchHistory.id == research_id,
                 ResearchHistory.user_email == user_email
             )
             .first()
         )
 
-        if not record:
+        if not item:
             return False
 
-        db.delete(record)
+        db.delete(item)
         db.commit()
 
         return True
-
-    finally:
-        db.close()
-
-
-def save_pdf_context(
-    user_email: str,
-    filename: str,
-    text: str
-):
-    db = SessionLocal()
-
-    try:
-        record = UploadedDocument(
-            user_email=user_email,
-            filename=filename,
-            content=text,
-            created_at=datetime.utcnow()
-        )
-
-        db.add(record)
-        db.commit()
-
-        return True
-
-    finally:
-        db.close()
-
-
-def get_user_pdf_context(
-    user_email: str
-):
-    db = SessionLocal()
-
-    try:
-        records = (
-            db.query(UploadedDocument)
-            .filter(UploadedDocument.user_email == user_email)
-            .order_by(UploadedDocument.created_at.desc())
-            .all()
-        )
-
-        return "\n\n".join(
-            record.content for record in records
-        )
 
     finally:
         db.close()

@@ -125,3 +125,14 @@ class ResearchResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     provider: str = "groq"
+    
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+    
+class QuestionRequest(BaseModel):
+    question: str
+    
+class AskDocumentRequest(BaseModel):
+    document_id: int
+    question: str

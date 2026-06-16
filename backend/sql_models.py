@@ -1,10 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from sqlalchemy.orm import declarative_base
 from datetime import datetime
-
-
-Base = declarative_base()
-
+from sql_database import Base
 
 class User(Base):
     __tablename__ = "users"
@@ -36,11 +32,7 @@ class User(Base):
 class ResearchHistory(Base):
     __tablename__ = "research_history"
 
-    id = Column(
-        Integer,
-        primary_key=True,
-        index=True
-    )
+    id = Column(String, primary_key=True, index=True)
 
     user_email = Column(
         String,
@@ -72,29 +64,9 @@ class ResearchHistory(Base):
 class UploadedDocument(Base):
     __tablename__ = "uploaded_documents"
 
-    id = Column(
-        Integer,
-        primary_key=True,
-        index=True
-    )
-
-    user_email = Column(
-        String,
-        index=True,
-        nullable=False
-    )
-
-    filename = Column(
-        String,
-        nullable=False
-    )
-
-    content = Column(
-        Text,
-        nullable=False
-    )
-
-    created_at = Column(
-        DateTime,
-        default=datetime.utcnow
-    )
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

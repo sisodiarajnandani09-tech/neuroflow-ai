@@ -6,35 +6,57 @@ from fastapi import (
     HTTPException,
     Depends,
     UploadFile,
-    File
+    File,
+    Request
 )
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from docx import Document
 
 from reportlab.platypus import (SimpleDocTemplate,Paragraph,Spacer)
 from reportlab.lib.styles import (getSampleStyleSheet)
 from auth import (get_current_user,create_access_token)
-from models import (ResearchRequest,UserRegister,UserLogin)
+from models import (ResearchRequest,UserRegister,UserLogin,QuestionRequest)
 from agents.pipeline import ResearchPipeline
-from services.pdf_service import process_pdf
+# from services.pdf_service import ask_question_from_pdf, process_pdf
 from services.llm_router import ask_llm
 from services.smart_router import (classify_intent,generate_chat_answer)
-from sql_database import (
-    save_research,
-    get_user_history,
-    delete_research,
-    create_user,
-    authenticate_user,
-    save_pdf_context,
-    get_user_pdf_context
-)
+from sql_database import (save_research,get_user_history,delete_research,create_user,authenticate_user)
+from models import (ResearchRequest,UserRegister,UserLogin,ChangePasswordRequest)
+from auth import hash_password, verify_password
+from db import SessionLocal
+from sql_models import User
+from starlette.middleware.sessions import SessionMiddleware
+from authlib.integrations.starlette_client import OAuth
+from services.file_service import (extract_pdf_text,extract_image_text)
+from sql_models import UploadedDocument
+from models import AskDocumentRequest
 
 app = FastAPI(
     title="NeuroFlow AI",
     version="1.0.0"
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv(
+        "JWT_SECRET_KEY",
+        "neuroflow-session-secret"
+    )
+)
+
+oauth = OAuth()
+
+oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={
+        "scope": "openid email profile"
+    }
 )
 
 app.add_middleware(
@@ -166,10 +188,6 @@ async def research(
     print("USER =", user)
     print("TOPIC =", topic)
 
-    pdf_context = get_user_pdf_context(
-        user
-    )
-
     intent = await classify_intent(
         topic
     )
@@ -205,9 +223,9 @@ async def research(
     pipeline = ResearchPipeline()
 
     state = await pipeline.run(
-        topic=topic,
-        pdf_context=pdf_context
-    )
+    topic=topic,
+    pdf_context=""
+)
 
     final_report = (
         state.final_verified_report
@@ -275,58 +293,59 @@ async def delete_history(
     }
 
 
-@app.post("/upload-pdf")
-async def upload_pdf(
-    file: UploadFile = File(...),
-    user=Depends(get_current_user)
-):
+# @app.post("/upload-pdf")
+# async def upload_pdf(
+#     file: UploadFile = File(...),
+#     user=Depends(get_current_user)
+# ):
 
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized"
-        )
+#     if not user:
+#         raise HTTPException(
+#             status_code=401,
+#             detail="Unauthorized"
+#         )
 
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files allowed"
-        )
+#     if not file.filename.lower().endswith(".pdf"):
+#         raise HTTPException(
+#             status_code=400,
+#             detail="Only PDF files allowed"
+#         )
 
-    safe_filename = file.filename.replace(
-        " ",
-        "_"
-    )
+#     safe_filename = file.filename.replace(
+#         " ",
+#         "_"
+#     )
 
-    file_path = os.path.join(
-        UPLOAD_DIR,
-        safe_filename
-    )
+#     file_path = os.path.join(
+#         UPLOAD_DIR,
+#         safe_filename
+#     )
 
-    with open(
-        file_path,
-        "wb"
-    ) as buffer:
-        buffer.write(
-            await file.read()
-        )
+#     with open(
+#         file_path,
+#         "wb"
+#     ) as buffer:
+#         buffer.write(
+#             await file.read()
+#         )
 
-    text = process_pdf(
-        file_path
-    )
+#     text = process_pdf(
+#         file_path
+#     )
 
-    save_pdf_context(
-        user_email=user,
-        filename=file.filename,
-        text=text
-    )
+#     save_pdf_context(
+#         user_email=user,
+#         filename=file.filename,
+#         text=text
+#     )
 
-    return {
-        "message": "PDF uploaded successfully",
-        "filename": file.filename,
-        "characters": len(text),
-        "preview": text[:500]
-    }
+#     return {
+#         "message": "PDF uploaded successfully",
+#         "filename": file.filename,
+#         "characters": len(text),
+#         "preview": text[:500]
+#     }
+    
 
 
 @app.post("/download-docx")
@@ -540,3 +559,278 @@ async def test_llm():
         "result": result
     }
     
+    
+@app.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    user=Depends(get_current_user)
+):
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized"
+        )
+
+    db = SessionLocal()
+
+    try:
+        db_user = (
+            db.query(User)
+            .filter(User.email == user)
+            .first()
+        )
+
+        if not db_user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        if not verify_password(
+            request.old_password,
+            db_user.password
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Old password is incorrect"
+            )
+
+        db_user.password = hash_password(
+            request.new_password
+        )
+
+        db.commit()
+
+        return {
+            "message": "Password changed successfully"
+        }
+
+    finally:
+        db.close()
+        
+@app.get("/auth/google/login")
+async def google_login(request: Request):
+    redirect_uri = os.getenv(
+        "GOOGLE_REDIRECT_URI",
+        "http://127.0.0.1:8000/auth/google/callback"
+    )
+
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri
+    )
+
+
+@app.get("/auth/google/callback")
+async def google_callback(request: Request):
+    try:
+        token = await oauth.google.authorize_access_token(
+            request
+        )
+
+        user_info = token.get("userinfo")
+
+        if not user_info:
+            user_info = await oauth.google.parse_id_token(
+                request,
+                token
+            )
+
+        email = user_info.get("email")
+
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Google email not found"
+            )
+
+        if not email.endswith("@gmail.com"):
+            raise HTTPException(
+                status_code=400,
+                detail="Only Gmail accounts are allowed"
+            )
+
+        create_user(
+            email=email,
+            password="GOOGLE_OAUTH_USER"
+        )
+
+        access_token = create_access_token(
+            {
+                "sub": email
+            }
+        )
+
+        frontend_url = os.getenv(
+            "FRONTEND_URL",
+            "http://localhost:3000"
+        )
+
+        return RedirectResponse(
+            url=f"{frontend_url}/oauth-success?token={access_token}"
+        )
+
+    except Exception as e:
+        frontend_url = os.getenv(
+            "FRONTEND_URL",
+            "http://localhost:3000"
+        )
+
+        return RedirectResponse(
+            url=f"{frontend_url}/?error=google_login_failed"
+        )
+        
+# @app.post("/ask-pdf")
+# async def ask_pdf(
+#     request: QuestionRequest,
+#     user=Depends(get_current_user)
+# ):
+#     if not user:
+#         raise HTTPException(
+#             status_code=401,
+#             detail="Unauthorized"
+#         )
+
+#     answer = await ask_question_from_pdf(
+#         user_email=user,
+#         question=request.question
+#     )
+
+#     return {
+#         "answer": answer,
+#         "report": answer,
+#         "logs": [
+#             "PDF Q&A Mode Activated",
+#             "Answered from uploaded PDF context"
+#         ]
+#     }
+    
+@app.post("/upload-file")
+async def upload_file(
+    file: UploadFile = File(...),
+    user=Depends(get_current_user)
+):
+
+    uploads_dir = "uploads"
+
+    os.makedirs(
+        uploads_dir,
+        exist_ok=True
+    )
+
+    filepath = os.path.join(
+        uploads_dir,
+        file.filename
+    )
+
+    with open(filepath, "wb") as f:
+        f.write(await file.read())
+
+    filename = file.filename.lower()
+
+    if filename.endswith(".pdf"):
+
+        content = extract_pdf_text(
+            filepath
+        )
+
+        file_type = "pdf"
+
+    elif filename.endswith(
+        (".png", ".jpg", ".jpeg")
+    ):
+
+        content = extract_image_text(
+            filepath
+        )
+
+        file_type = "image"
+
+    else:
+
+        return {
+            "error":
+            "Only PDF/JPG/PNG supported"
+        }
+
+    db = SessionLocal()
+
+    document = UploadedDocument(
+        user_email=user,
+        filename=file.filename,
+        file_type=file_type,
+        content=content
+    )
+
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
+    return {
+        "message":
+        "File uploaded successfully",
+        "document_id":
+        document.id,
+        "filename":
+        document.filename
+    }
+    
+@app.post("/ask-document")
+async def ask_document(
+    request: AskDocumentRequest,
+    user=Depends(get_current_user)
+):
+    db = SessionLocal()
+
+    try:
+        document = (
+            db.query(UploadedDocument)
+            .filter(
+                UploadedDocument.id == request.document_id,
+                UploadedDocument.user_email == user
+            )
+            .first()
+        )
+
+        if not document:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found"
+            )
+
+        prompt = f"""
+Answer only from the uploaded file content.
+
+File Name:
+{document.filename}
+
+File Type:
+{document.file_type}
+
+File Content:
+{document.content}
+
+Question:
+{request.question}
+
+Rules:
+- Give direct answer.
+- Do not generate research report.
+- Do not use fixed report format.
+- If answer is not present, say:
+  Information not found in uploaded file.
+"""
+
+        answer = await ask_llm(prompt)
+
+        return {
+            "answer": answer,
+            "report": answer,
+            "logs": [
+                "Document Q&A Mode Activated",
+                f"Answered from {document.filename}"
+            ]
+        }
+
+    finally:
+        db.close()
