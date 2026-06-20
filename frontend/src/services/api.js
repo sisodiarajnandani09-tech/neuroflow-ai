@@ -1,14 +1,16 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "http://127.0.0.1:8000",
+  baseURL:
+    process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000",
   timeout: 120000,
 });
 
 API.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("token");
-    const selectedModel = localStorage.getItem("selected_model") || "auto";
+    const selectedModel =
+      localStorage.getItem("selected_model") || "auto";
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
