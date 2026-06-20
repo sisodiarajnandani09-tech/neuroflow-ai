@@ -1,6 +1,9 @@
 import os
 import uuid
 import asyncio
+from db import engine
+from sql_models import Base
+
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +42,9 @@ app = FastAPI(
     title="NeuroFlow AI",
     version="1.0.0"
 )
+
+Base.metadata.create_all(bind=engine)
+
 
 app.add_middleware(
     SessionMiddleware,

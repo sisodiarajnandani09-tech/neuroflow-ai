@@ -1,6 +1,6 @@
-from sql_database import engine, Base
-import sql_models
+from db import engine
+from sql_models import Base
 
 Base.metadata.create_all(bind=engine)
 
-print("Database created successfully")
+print("Database tables created successfully")
