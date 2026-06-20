@@ -31,3 +31,4 @@ tabulate
 pandas
 openpyxl
 pypdf
+pptx
