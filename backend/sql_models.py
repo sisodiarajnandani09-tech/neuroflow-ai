@@ -70,3 +70,27 @@ class UploadedDocument(Base):
     file_type = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+class GeneratedAgent(Base):
+    __tablename__ = "generated_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_email = Column(String, index=True)
+    agent_name = Column(String)
+    agent_type = Column(String)
+    role = Column(Text)
+    goal = Column(Text)
+    prompt = Column(Text)
+    code = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+class MarketplaceAgent(Base):
+    __tablename__ = "marketplace_agents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    category = Column(String)
+    description = Column(Text)
+    icon = Column(String)
+    system_prompt = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)

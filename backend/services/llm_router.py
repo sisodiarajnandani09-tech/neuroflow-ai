@@ -1,27 +1,41 @@
 from services.groq_service import generate_with_groq
 from services.gemini_service import generate_with_gemini
-from services.ollama_service import generate_with_ollama
-from services.fallback_service import generate_fallback_answer
 
 
-async def ask_llm(prompt: str):
+async def ask_llm(prompt: str, model: str = "auto"):
 
-    try:
-        print("USING GROQ")
+    model = (model or "auto").lower()
+
+    # Explicit model selection
+    if model == "groq":
         return await generate_with_groq(prompt)
-    except Exception as e:
-        print("GROQ FAILED:", e)
 
-    try:
-        print("USING GEMINI")
+    if model == "gemini":
         return await generate_with_gemini(prompt)
-    except Exception as e:
-        print("GEMINI FAILED:", e)
 
+    # AUTO MODE
+    # 1. Groq (Fastest)
     try:
-        print("USING OLLAMA")
-        return await generate_with_ollama(prompt)
-    except Exception as e:
-        print("OLLAMA FAILED:", e)
+        print("Trying Groq...")
+        response = await generate_with_groq(prompt)
 
-    return generate_fallback_answer(prompt)
+        if response:
+            print("Groq Success")
+            return response
+
+    except Exception as e:
+        print("Groq Failed:", e)
+
+    # 2. Gemini Fallback
+    try:
+        print("Trying Gemini...")
+        response = await generate_with_gemini(prompt)
+
+        if response:
+            print("Gemini Success")
+            return response
+
+    except Exception as e:
+        print("Gemini Failed:", e)
+
+    return "AI model is currently unavailable."

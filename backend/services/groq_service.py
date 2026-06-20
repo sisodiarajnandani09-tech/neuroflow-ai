@@ -1,28 +1,29 @@
 import os
 from dotenv import load_dotenv
-
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
+from groq import AsyncGroq
 
 load_dotenv()
 
+client = AsyncGroq(
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 async def generate_with_groq(prompt: str):
+    try:
+        response = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,
+            max_tokens=2500
+        )
 
-    llm = ChatGroq(
-        model=os.getenv(
-            "GROQ_MODEL",
-            "llama-3.3-70b-versatile"
-        ),
-        api_key=os.getenv("GROQ_API_KEY"),
-        temperature=0.4,
-        max_tokens=1800
-    )
+        return response.choices[0].message.content
 
-    response = await llm.ainvoke(
-        [
-            HumanMessage(content=prompt)
-        ]
-    )
-
-    return response.content
+    except Exception as e:
+        print("Groq error:", e)
+        raise e

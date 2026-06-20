@@ -136,3 +136,13 @@ class QuestionRequest(BaseModel):
 class AskDocumentRequest(BaseModel):
     document_id: int
     question: str
+    
+from pydantic import BaseModel
+
+class AgentBuilderRequest(BaseModel):
+    agent_type: str
+    
+class RunAgentRequest(BaseModel):
+    agent_id: int
+    query: str
+    topic: str = Field(..., min_length=3, max_length=3000)

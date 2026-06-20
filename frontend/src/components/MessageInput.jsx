@@ -52,12 +52,14 @@ export default function MessageInput({
           }`}
         >
           <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf,image/png,image/jpeg,image/jpg"
-            onChange={selectFile}
-            className="hidden"
-          />
+  id="chat-file-upload"
+  name="chat-file-upload"
+  ref={fileInputRef}
+  type="file"
+  accept="application/pdf,image/png,image/jpeg,image/jpg"
+  onChange={selectFile}
+  className="hidden"
+/>
 
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -88,25 +90,28 @@ export default function MessageInput({
           </button>
 
           <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !loading) {
-                e.preventDefault();
-                sendMessage();
-              }
-            }}
-            placeholder={
-              selectedFile
-                ? "Ask a question about selected file..."
-                : "Ask anything..."
-            }
-            className={`flex-1 bg-transparent px-2 py-3 text-sm outline-none ${
-              darkMode
-                ? "text-white placeholder:text-slate-400"
-                : "text-slate-800"
-            }`}
-          />
+  id="chat-area-message"
+  name="chat-area-message"
+  value={input}
+  onChange={(e) => setInput(e.target.value)}
+  onKeyDown={(e) => {
+    if (e.key === "Enter" && !loading) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }}
+  placeholder={
+    selectedFile
+      ? "Ask a question about selected file..."
+      : "Ask anything..."
+  }
+  autoComplete="off"
+  className={`flex-1 bg-transparent px-2 py-3 text-sm outline-none ${
+    darkMode
+      ? "text-white placeholder:text-slate-400"
+      : "text-slate-800"
+  }`}
+/>
 
           <button
             onClick={() => {
