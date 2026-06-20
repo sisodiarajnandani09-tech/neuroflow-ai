@@ -28,3 +28,5 @@ python-dateutil
 faiss-cpu
 numpy
 tabulate
+pandas
+openpyxl
