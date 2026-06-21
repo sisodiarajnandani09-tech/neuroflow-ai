@@ -1069,6 +1069,11 @@ async def google_login(request: Request):
 
 @app.get("/auth/google/callback")
 async def google_callback(request: Request):
+    frontend_url = os.getenv(
+        "FRONTEND_URL",
+        "https://neuroflow-ai-beige.vercel.app"
+    )
+
     try:
         token = await oauth.google.authorize_access_token(request)
         user_info = token.get("userinfo")
@@ -1085,14 +1090,13 @@ async def google_callback(request: Request):
 
         access_token = create_access_token({"sub": email})
 
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
         return RedirectResponse(
             url=f"{frontend_url}/oauth-success?token={access_token}"
         )
 
-    except Exception:
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    except Exception as e:
+        print("Google login error:", e)
+
         return RedirectResponse(
             url=f"{frontend_url}/?error=google_login_failed"
         )
