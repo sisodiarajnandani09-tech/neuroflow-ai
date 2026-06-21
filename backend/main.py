@@ -1071,7 +1071,7 @@ async def google_login(request: Request):
 async def google_callback(request: Request):
     frontend_url = os.getenv(
         "FRONTEND_URL",
-        "https://neuroflow-ai-beige.vercel.app"
+        "https://neuroflow-ai-eta.vercel.app/"
     )
 
     try:
